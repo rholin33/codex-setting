@@ -1,0 +1,20 @@
+.DS_Store
+__pycache__/
+*.pyc
+.coverage
+
+# Codex runtime and local state should never be synced.
+auth.json
+history.jsonl
+*.sqlite
+*.sqlite-*
+log/
+logs/
+sessions/
+shell_snapshots/
+tmp/
+.tmp/
+
+# Local editor and OS metadata.
+.idea/
+.vscode/
