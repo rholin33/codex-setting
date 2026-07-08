@@ -36,7 +36,7 @@ python3 ~/.codex/skills/easypm/scripts/easypm.py select-project --query "<name>"
 python3 ~/.codex/skills/easypm/scripts/easypm.py bind --query "<name>"
 python3 ~/.codex/skills/easypm/scripts/easypm.py working-tasks
 python3 ~/.codex/skills/easypm/scripts/easypm.py new-task --task-type test --title "<title>" --effort 2
-python3 ~/.codex/skills/easypm/scripts/easypm.py add-labour --work-no 20 --effort 2 --labour-type test
+python3 ~/.codex/skills/easypm/scripts/easypm.py add-labour --work-guid "<guid>" --effort 2 --labour-type test
 python3 ~/.codex/skills/easypm/scripts/easypm.py finish-task --work-no 20 --effort 2 --labour-type test
 python3 ~/.codex/skills/easypm/scripts/easypm.py install-hook
 ```
@@ -70,6 +70,29 @@ When invoked outside a git repository, use global state under `~/.easypm/`: sele
 
 Use `select-project` for the normal global workflow. It first searches locally cached projects, then fetches from EasyPM when `--refresh` is supplied or no cached project matches. The selected project is written to the current context config and added to the global project list.
 
+## Stability And Retry Discipline
+
+EasyPM network calls are relatively fragile. For normal labour logging, minimize API calls and avoid broad retries.
+
+- Do not run exploratory project searches when the current conversation already gives a clear `projectNo`, `projectGuid`, or repeatedly used project mapping.
+- Prefer one exact project query first, such as `projects --query "宿迁学院"`; avoid broad fallback queries unless the exact query returns no result.
+- Use `select-project --project-no "<no>"` without `--refresh` when the project was just queried or selected recently. Use `--refresh` only when the local cache may be stale, the project was not found, or ambiguity must be resolved.
+- Use `working-tasks --json` when matching tasks for writes. It returns `workGuid`; copy that GUID into the write command.
+- Prefer `add-labour --work-guid "<guid>"` over `--work-no`. `--work-no` forces an extra task-list lookup and is more likely to fail on unstable network calls.
+- If a network/TLS/timeout error happens before a write result is printed, retry at most once with a narrower command. For `add-labour`, retry with `--work-guid` if available.
+- If the retry also fails, stop and report the exact unrecorded item; do not keep retrying.
+- If an EasyPM command returns JSON with `created`, `updated`, or `labourLog`, treat it as successful and do not retry.
+
+## Ambiguous Choices
+
+If the user's project or task description can match more than one project or task, stop and ask the user to choose before taking any write action.
+
+For project ambiguity, list the candidate projects with `projectNo`, `projectName`, owner, status, progress, and `projectGuid`. Do not select a project or create/update labour until the user chooses one.
+
+For task ambiguity, list the candidate tasks with `workNo`, title, status, effort, owner, and `workGuid`. Do not create a new task or add labour until the user chooses an existing task or confirms that none of the candidates should be used.
+
+Only proceed automatically when there is exactly one clear active match. If there are closed and active matches, prefer the active match only when it is clearly the same project/task requested; otherwise ask.
+
 ## Existing Task First Rule
 
 Before creating a task for a project, first check whether a matching task already exists in that project.
@@ -77,8 +100,8 @@ Before creating a task for a project, first check whether a matching task alread
 Use this workflow for each project/task request:
 
 ```bash
-python3 ~/.codex/skills/easypm/scripts/easypm.py select-project --project-no "<no>" --refresh
-python3 ~/.codex/skills/easypm/scripts/easypm.py working-tasks
+python3 ~/.codex/skills/easypm/scripts/easypm.py select-project --project-no "<no>"
+python3 ~/.codex/skills/easypm/scripts/easypm.py working-tasks --json
 ```
 
 Compare the requested work with existing task titles, task type prefixes, and keywords. Treat close semantic matches as existing tasks, for example "部署调试" can match an existing deployment/debugging task for the same project.
@@ -86,7 +109,7 @@ Compare the requested work with existing task titles, task type prefixes, and ke
 If a matching task exists, do not run `new-task`. Add the requested day's labour to the existing task instead:
 
 ```bash
-python3 ~/.codex/skills/easypm/scripts/easypm.py add-labour --work-no "<workNo>" --effort 2 --labour-type deploy --labour-date "<YYYY-MM-DD>"
+python3 ~/.codex/skills/easypm/scripts/easypm.py add-labour --work-guid "<workGuid>" --effort 2 --labour-type deploy --labour-date "<YYYY-MM-DD>"
 ```
 
 Use the requested actual man-hours as `--effort`, choose the labour type from the work being recorded, and pass the requested labour date explicitly when the user says today/yesterday or gives a date. `add-labour` records actual labour only and does not change the task's planned effort. Only create a new task when no suitable existing task is found.
@@ -96,10 +119,10 @@ Use the requested actual man-hours as `--effort`, choose the labour type from th
 After selecting a project, use:
 
 ```bash
-python3 ~/.codex/skills/easypm/scripts/easypm.py working-tasks
+python3 ~/.codex/skills/easypm/scripts/easypm.py working-tasks --json
 python3 ~/.codex/skills/easypm/scripts/easypm.py finish-task --work-no "<no>" --effort 2 --labour-type test
-python3 ~/.codex/skills/easypm/scripts/easypm.py add-labour --work-no "<no>" --effort 2 --labour-type program
-python3 ~/.codex/skills/easypm/scripts/easypm.py update-effort --work-no "<no>" --effort 4 --labour-type program
+python3 ~/.codex/skills/easypm/scripts/easypm.py add-labour --work-guid "<guid>" --effort 2 --labour-type program
+python3 ~/.codex/skills/easypm/scripts/easypm.py update-effort --work-guid "<guid>" --effort 4 --labour-type program
 python3 ~/.codex/skills/easypm/scripts/easypm.py new-task --task-type design --title "<title>" --effort 2 --confirm
 ```
 
