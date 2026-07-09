@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import pathlib,runpy; runpy.run_path(str(pathlib.Path.home()/'.codex'/'hooks'/'sync-codex-setting.py'), run_name='__main__')\"",
+            "commandWindows": "python -c \"import pathlib,runpy; runpy.run_path(str(pathlib.Path.home()/'.codex'/'hooks'/'sync-codex-setting.py'), run_name='__main__')\"",
+            "timeout": 120,
+            "statusMessage": "Syncing Codex global config"
+          }
+        ]
+      }
+    ]
+  }
+}

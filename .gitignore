@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .coverage
+hooks/*.ps1
 
 # Codex runtime and local state should never be synced.
 auth.json

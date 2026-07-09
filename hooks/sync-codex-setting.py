@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+REMOTE_URL = "https://github.com/rholin33/codex-setting.git"
+MANAGED_TOP_LEVEL_FILES = ("AGENTS.md", "hooks.json")
+MANAGED_DIRECTORIES = ("rules", "skills", "hooks")
+TEXT_EXTENSIONS = {
+    ".md",
+    ".txt",
+    ".toml",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".csv",
+    ".py",
+    ".ps1",
+    ".sh",
+    ".js",
+    ".ts",
+    ".cjs",
+    ".mjs",
+    ".css",
+    ".html",
+}
+
+
+def get_codex_home() -> Path:
+    configured_home = os.environ.get("CODEX_HOME")
+    if configured_home:
+        return Path(configured_home).expanduser()
+    return Path.home() / ".codex"
+
+
+CODEX_HOME = get_codex_home()
+SYNC_ROOT = CODEX_HOME / ".sync" / "codex-setting"
+REMOTE_REPO = SYNC_ROOT / "remote"
+LAST_REMOTE = SYNC_ROOT / "last-remote"
+BACKUP_ROOT = SYNC_ROOT / "backups"
+MERGE_ROOT = SYNC_ROOT / "merge-work"
+LOG_PATH = CODEX_HOME / "log" / "codex-setting-sync.log"
+
+
+def ensure_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def write_log(message: str) -> None:
+    ensure_directory(LOG_PATH.parent)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with LOG_PATH.open("a", encoding="utf-8") as log_file:
+        log_file.write(f"[{timestamp}] {message}\n")
+
+
+def run_git(arguments: list[str]) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(arguments)} failed: {result.stdout}")
+    return result.stdout
+
+
+def get_relative_path(base_path: Path, path: Path) -> Path:
+    return path.resolve().relative_to(base_path.resolve())
+
+
+def get_managed_remote_files() -> list[Path]:
+    pathspecs = [*MANAGED_TOP_LEVEL_FILES, *MANAGED_DIRECTORIES]
+    output = run_git(["-C", str(REMOTE_REPO), "ls-files", "--", *pathspecs])
+    files: list[Path] = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        file_path = REMOTE_REPO / line.strip()
+        if file_path.is_file():
+            files.append(file_path)
+    return files
+
+
+def copy_with_parents(source: Path, destination: Path) -> None:
+    ensure_directory(destination.parent)
+    shutil.copy2(source, destination)
+
+
+def backup_local_file(relative_path: Path, backup_directory: Path) -> None:
+    local_path = CODEX_HOME / relative_path
+    if local_path.is_file():
+        copy_with_parents(local_path, backup_directory / relative_path)
+
+
+def hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def is_text_file(path: Path) -> bool:
+    if path.suffix.lower() in TEXT_EXTENSIONS:
+        return True
+
+    with path.open("rb") as file:
+        sample = file.read(8192)
+    return b"\0" not in sample
+
+
+def copy_remote_snapshot(destination_root: Path) -> None:
+    ensure_directory(destination_root)
+    for remote_file in get_managed_remote_files():
+        relative_path = get_relative_path(REMOTE_REPO, remote_file)
+        copy_with_parents(remote_file, destination_root / relative_path)
+
+
+def update_remote_checkout() -> None:
+    ensure_directory(SYNC_ROOT)
+    if (REMOTE_REPO / ".git").is_dir():
+        run_git(["-C", str(REMOTE_REPO), "pull", "--ff-only", "--depth=1"])
+        return
+
+    if REMOTE_REPO.exists() and any(REMOTE_REPO.iterdir()):
+        raise RuntimeError(f"remote checkout exists but is not a git repo: {REMOTE_REPO}")
+
+    run_git(["clone", "--depth=1", REMOTE_URL, str(REMOTE_REPO)])
+
+
+def merge_text_file(
+    relative_path: Path,
+    local_path: Path,
+    base_path: Path,
+    remote_path: Path,
+    backup_directory: Path,
+) -> bool:
+    ensure_directory(MERGE_ROOT)
+    with tempfile.TemporaryDirectory(dir=MERGE_ROOT) as work_directory:
+        work_path = Path(work_directory)
+        ours = work_path / "ours"
+        base = work_path / "base"
+        theirs = work_path / "theirs"
+        shutil.copy2(local_path, ours)
+        shutil.copy2(base_path, base)
+        shutil.copy2(remote_path, theirs)
+
+        result = subprocess.run(
+            ["git", "merge-file", "--union", str(ours), str(base), str(theirs)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            copy_with_parents(remote_path, backup_directory / f"{relative_path}.remote")
+            write_log(f"merge conflict kept local file: {relative_path}")
+            return False
+
+        backup_local_file(relative_path, backup_directory)
+        shutil.copy2(ours, local_path)
+        write_log(f"merged text file: {relative_path}")
+        return True
+
+
+def merge_managed_files() -> None:
+    backup_directory = BACKUP_ROOT / datetime.now().strftime("%Y%m%d-%H%M%S")
+    changed_count = 0
+
+    for remote_file in get_managed_remote_files():
+        relative_path = get_relative_path(REMOTE_REPO, remote_file)
+        local_path = CODEX_HOME / relative_path
+        base_path = LAST_REMOTE / relative_path
+
+        if local_path.is_dir():
+            write_log(f"kept local directory because remote path is file: {relative_path}")
+            continue
+
+        if not local_path.exists():
+            copy_with_parents(remote_file, local_path)
+            changed_count += 1
+            write_log(f"copied missing remote file: {relative_path}")
+            continue
+
+        if not base_path.is_file():
+            write_log(f"kept local file because no baseline exists: {relative_path}")
+            continue
+
+        local_hash = hash_file(local_path)
+        remote_hash = hash_file(remote_file)
+        base_hash = hash_file(base_path)
+
+        if local_hash == remote_hash:
+            continue
+
+        if local_hash == base_hash:
+            backup_local_file(relative_path, backup_directory)
+            copy_with_parents(remote_file, local_path)
+            changed_count += 1
+            write_log(f"updated unchanged local file from remote: {relative_path}")
+            continue
+
+        if remote_hash == base_hash:
+            continue
+
+        if is_text_file(local_path) and is_text_file(base_path) and is_text_file(remote_file):
+            if merge_text_file(relative_path, local_path, base_path, remote_file, backup_directory):
+                changed_count += 1
+            continue
+
+        copy_with_parents(remote_file, backup_directory / f"{relative_path}.remote")
+        write_log(f"kept local binary file and saved remote copy: {relative_path}")
+
+    copy_remote_snapshot(LAST_REMOTE)
+    write_log(f"sync finished; changed files: {changed_count}")
+
+
+def main() -> int:
+    try:
+        ensure_directory(SYNC_ROOT)
+        ensure_directory(BACKUP_ROOT)
+        ensure_directory(MERGE_ROOT)
+
+        if not shutil.which("git"):
+            write_log("git not found; skipped")
+            return 0
+
+        update_remote_checkout()
+
+        if not (LAST_REMOTE / "AGENTS.md").is_file():
+            copy_remote_snapshot(LAST_REMOTE)
+            write_log("initialized remote baseline")
+
+        merge_managed_files()
+    except Exception as error:
+        write_log(f"sync failed: {error}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

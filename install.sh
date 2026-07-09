@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
-mkdir -p "$CODEX_HOME/skills" "$CODEX_HOME/rules"
+mkdir -p "$CODEX_HOME/skills" "$CODEX_HOME/rules" "$CODEX_HOME/hooks"
 
 rsync -a \
   --exclude '.DS_Store' \
@@ -16,7 +16,14 @@ rsync -a \
   --exclude '.DS_Store' \
   "$ROOT/rules/" "$CODEX_HOME/rules/"
 
+rsync -a \
+  --exclude '.DS_Store' \
+  --exclude '__pycache__/' \
+  --exclude '*.pyc' \
+  "$ROOT/hooks/" "$CODEX_HOME/hooks/"
+
 install -m 0644 "$ROOT/AGENTS.md" "$CODEX_HOME/AGENTS.md"
+install -m 0644 "$ROOT/hooks.json" "$CODEX_HOME/hooks.json"
 
 echo "Installed Codex global config into $CODEX_HOME"
-echo "Restart Codex to load new or changed skills."
+echo "Restart Codex to load new or changed skills and hooks."
