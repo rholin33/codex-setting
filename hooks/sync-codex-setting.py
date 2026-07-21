@@ -159,13 +159,15 @@ def copy_remote_snapshot(destination_root: Path) -> None:
 def update_remote_checkout() -> None:
     ensure_directory(SYNC_ROOT)
     if (REMOTE_REPO / ".git").is_dir():
-        run_git(["-C", str(REMOTE_REPO), "pull", "--ff-only", "--depth=1"])
+        if (REMOTE_REPO / ".git/shallow").is_file():
+            run_git(["-C", str(REMOTE_REPO), "fetch", "--unshallow", "origin"])
+        run_git(["-C", str(REMOTE_REPO), "pull", "--ff-only"])
         return
 
     if REMOTE_REPO.exists() and any(REMOTE_REPO.iterdir()):
         raise RuntimeError(f"remote checkout exists but is not a git repo: {REMOTE_REPO}")
 
-    run_git(["clone", "--depth=1", REMOTE_URL, str(REMOTE_REPO)])
+    run_git(["clone", REMOTE_URL, str(REMOTE_REPO)])
 
 
 def get_required_roles() -> list[str]:
