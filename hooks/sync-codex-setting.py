@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -56,6 +57,8 @@ LAST_REMOTE = SYNC_ROOT / "last-remote"
 BACKUP_ROOT = SYNC_ROOT / "backups"
 MERGE_ROOT = SYNC_ROOT / "merge-work"
 LOG_PATH = CODEX_HOME / "log" / "codex-setting-sync.log"
+ROLE_INSTALL_STATE_PATH = SYNC_ROOT / "installed-roles.json"
+ROLE_INSTALL_TIMEOUT_SECONDS = 30
 
 
 def ensure_directory(path: Path) -> None:
@@ -163,6 +166,83 @@ def update_remote_checkout() -> None:
         raise RuntimeError(f"remote checkout exists but is not a git repo: {REMOTE_REPO}")
 
     run_git(["clone", "--depth=1", REMOTE_URL, str(REMOTE_REPO)])
+
+
+def get_required_roles() -> list[str]:
+    manifest_path = REMOTE_REPO / "ccb/roles.json"
+    if not manifest_path.is_file():
+        return []
+
+    with manifest_path.open(encoding="utf-8") as manifest_file:
+        manifest = json.load(manifest_file)
+
+    if manifest.get("schema_version") != 1:
+        raise ValueError("unsupported CCB role manifest schema")
+
+    roles = manifest.get("roles")
+    if not isinstance(roles, list) or not all(
+        isinstance(role, str) and role.startswith("agentroles.") for role in roles
+    ):
+        raise ValueError("invalid CCB role manifest")
+    return list(dict.fromkeys(roles))
+
+
+def load_installed_role_state() -> set[str]:
+    if not ROLE_INSTALL_STATE_PATH.is_file():
+        return set()
+
+    try:
+        with ROLE_INSTALL_STATE_PATH.open(encoding="utf-8") as state_file:
+            state = json.load(state_file)
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+    roles = state.get("roles", [])
+    if not isinstance(roles, list):
+        return set()
+    return {role for role in roles if isinstance(role, str)}
+
+
+def save_installed_role_state(roles: set[str]) -> None:
+    ensure_directory(ROLE_INSTALL_STATE_PATH.parent)
+    temporary_path = ROLE_INSTALL_STATE_PATH.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps({"schema_version": 1, "roles": sorted(roles)}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary_path.replace(ROLE_INSTALL_STATE_PATH)
+
+
+def install_required_roles() -> None:
+    ccb_executable = shutil.which("ccb")
+    if not ccb_executable:
+        write_log("ccb not found; skipped Role installation")
+        return
+
+    installed_roles = load_installed_role_state()
+    for role in get_required_roles():
+        if role in installed_roles:
+            continue
+
+        try:
+            result = subprocess.run(
+                [ccb_executable, "roles", "install", role, "--skip-tools"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=ROLE_INSTALL_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            write_log(f"Role installation timed out: {role}")
+            continue
+
+        if result.returncode != 0:
+            write_log(f"Role installation failed: {role} (exit {result.returncode})")
+            continue
+
+        installed_roles.add(role)
+        save_installed_role_state(installed_roles)
+        write_log(f"installed CCB Role: {role}")
 
 
 def merge_text_file(
@@ -283,6 +363,7 @@ def main() -> int:
             write_log("initialized remote baseline")
 
         merge_managed_files()
+        install_required_roles()
     except Exception as error:
         write_log(f"sync failed: {error}")
     return 0

@@ -10,6 +10,7 @@ This repository stores portable Codex global configuration that is safe to sync 
 - `rules/`: global reusable rules.
 - `hooks/`: user-level Codex lifecycle hooks.
 - `ccb/ccb.config`: portable CCB agent and window configuration.
+- `ccb/roles.json`: Role packages required by the portable CCB configuration.
 - `install.sh`: installs this repository into `$CODEX_HOME`, defaulting to `~/.codex`.
 
 Do not store Codex or CCB runtime state here, such as credentials, history, sqlite databases, logs, sessions, agent state, backups, or shell snapshots.
@@ -19,7 +20,9 @@ CCB regenerates `.ccb/agents/` from `ccb.config`; do not copy or commit that dir
 
 The `SessionStart` hook pulls this repository and synchronizes the managed Codex files into `$CODEX_HOME`. It also treats `ccb/ccb.config` as remote-authoritative and installs it into `${CCB_HOME:-~/.ccb}/ccb.config`, backing up a different local copy first and preserving user-only file permissions.
 
-The hook does not reload or restart CCB. A running CCB project keeps its mounted service graph until the operator applies a supported reload or starts CCB again. Role packages referenced by `ccb.config` must be installed separately on each machine; generated `.ccb/agents/` directories are never synchronized.
+The hook installs Role packages declared in `ccb/roles.json` with `--skip-tools`. Successful installations are recorded per device; unavailable or timed-out packages are logged and retried on later sessions without blocking Codex startup.
+
+The hook does not reload or restart CCB. A running CCB project keeps its mounted service graph until the operator applies a supported reload or starts CCB again. Generated `.ccb/agents/` directories are never synchronized.
 
 ## Install On A Machine
 

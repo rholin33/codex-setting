@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "roles": [
+    "agentroles.ccb_self",
+    "agentroles.archi",
+    "agentroles.coder",
+    "agentroles.open_design",
+    "agentroles.code_reviewer"
+  ]
+}
