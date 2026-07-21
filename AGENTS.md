@@ -78,3 +78,10 @@ Default rule:
 - testing, validation, and acceptance checks go to `test`
 
 Mixed tasks should be split by lane when useful. If the user asks `master` to do a business task directly, `master` should translate that request into delegated work unless the user explicitly wants coordination-only advice.
+
+## CCB Configuration Sync
+
+- The portable CCB desired state is stored in `ccb/ccb.config` in this repository.
+- The `SessionStart` hook syncs that file to `~/.ccb/ccb.config` as a remote-authoritative configuration and backs up a different local copy before replacement.
+- Syncing updates disk configuration only. It must not reload, restart, or otherwise mutate a mounted CCB runtime automatically.
+- Never sync `.ccb/agents/`, provider state, jobs, events, runtime bindings, or generated agent memory. CCB recreates those from `ccb.config` and installed Role packages.

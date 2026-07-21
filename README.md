@@ -15,6 +15,12 @@ This repository stores portable Codex global configuration that is safe to sync 
 Do not store Codex or CCB runtime state here, such as credentials, history, sqlite databases, logs, sessions, agent state, backups, or shell snapshots.
 CCB regenerates `.ccb/agents/` from `ccb.config`; do not copy or commit that directory because it contains project paths, runtime bindings, task history, and provider state.
 
+## Automatic Sync
+
+The `SessionStart` hook pulls this repository and synchronizes the managed Codex files into `$CODEX_HOME`. It also treats `ccb/ccb.config` as remote-authoritative and installs it into `${CCB_HOME:-~/.ccb}/ccb.config`, backing up a different local copy first and preserving user-only file permissions.
+
+The hook does not reload or restart CCB. A running CCB project keeps its mounted service graph until the operator applies a supported reload or starts CCB again. Role packages referenced by `ccb.config` must be installed separately on each machine; generated `.ccb/agents/` directories are never synchronized.
+
 ## Install On A Machine
 
 ```bash

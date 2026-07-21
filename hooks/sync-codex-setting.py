@@ -13,6 +13,7 @@ from pathlib import Path
 REMOTE_URL = "https://github.com/rholin33/codex-setting.git"
 MANAGED_TOP_LEVEL_FILES = ("AGENTS.md", "hooks.json")
 MANAGED_DIRECTORIES = ("rules", "skills", "hooks")
+CCB_CONFIG_RELATIVE_PATH = Path("ccb/ccb.config")
 TEXT_EXTENSIONS = {
     ".md",
     ".txt",
@@ -40,7 +41,15 @@ def get_codex_home() -> Path:
     return Path.home() / ".codex"
 
 
+def get_ccb_home() -> Path:
+    configured_home = os.environ.get("CCB_HOME")
+    if configured_home:
+        return Path(configured_home).expanduser()
+    return Path.home() / ".ccb"
+
+
 CODEX_HOME = get_codex_home()
+CCB_HOME = get_ccb_home()
 SYNC_ROOT = CODEX_HOME / ".sync" / "codex-setting"
 REMOTE_REPO = SYNC_ROOT / "remote"
 LAST_REMOTE = SYNC_ROOT / "last-remote"
@@ -80,7 +89,11 @@ def get_relative_path(base_path: Path, path: Path) -> Path:
 
 
 def get_managed_remote_files() -> list[Path]:
-    pathspecs = [*MANAGED_TOP_LEVEL_FILES, *MANAGED_DIRECTORIES]
+    pathspecs = [
+        *MANAGED_TOP_LEVEL_FILES,
+        *MANAGED_DIRECTORIES,
+        str(CCB_CONFIG_RELATIVE_PATH),
+    ]
     output = run_git(["-C", str(REMOTE_REPO), "ls-files", "--", *pathspecs])
     files: list[Path] = []
     for line in output.splitlines():
@@ -97,8 +110,21 @@ def copy_with_parents(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def get_local_managed_path(relative_path: Path) -> Path:
+    if relative_path == CCB_CONFIG_RELATIVE_PATH:
+        return CCB_HOME / "ccb.config"
+    return CODEX_HOME / relative_path
+
+
+def copy_remote_to_local(relative_path: Path, remote_path: Path) -> None:
+    local_path = get_local_managed_path(relative_path)
+    copy_with_parents(remote_path, local_path)
+    if relative_path == CCB_CONFIG_RELATIVE_PATH:
+        local_path.chmod(0o600)
+
+
 def backup_local_file(relative_path: Path, backup_directory: Path) -> None:
-    local_path = CODEX_HOME / relative_path
+    local_path = get_local_managed_path(relative_path)
     if local_path.is_file():
         copy_with_parents(local_path, backup_directory / relative_path)
 
@@ -182,7 +208,7 @@ def merge_managed_files() -> None:
 
     for remote_file in get_managed_remote_files():
         relative_path = get_relative_path(REMOTE_REPO, remote_file)
-        local_path = CODEX_HOME / relative_path
+        local_path = get_local_managed_path(relative_path)
         base_path = LAST_REMOTE / relative_path
 
         if local_path.is_dir():
@@ -190,9 +216,21 @@ def merge_managed_files() -> None:
             continue
 
         if not local_path.exists():
-            copy_with_parents(remote_file, local_path)
+            copy_remote_to_local(relative_path, remote_file)
             changed_count += 1
             write_log(f"copied missing remote file: {relative_path}")
+            continue
+
+        if relative_path == CCB_CONFIG_RELATIVE_PATH:
+            if hash_file(local_path) != hash_file(remote_file):
+                backup_local_file(relative_path, backup_directory)
+                copy_remote_to_local(relative_path, remote_file)
+                changed_count += 1
+                write_log(f"updated CCB config from remote: {relative_path}")
+            elif local_path.stat().st_mode & 0o777 != 0o600:
+                local_path.chmod(0o600)
+                changed_count += 1
+                write_log(f"fixed CCB config permissions: {relative_path}")
             continue
 
         if not base_path.is_file():
@@ -208,7 +246,7 @@ def merge_managed_files() -> None:
 
         if local_hash == base_hash:
             backup_local_file(relative_path, backup_directory)
-            copy_with_parents(remote_file, local_path)
+            copy_remote_to_local(relative_path, remote_file)
             changed_count += 1
             write_log(f"updated unchanged local file from remote: {relative_path}")
             continue
