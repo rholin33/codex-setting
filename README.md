@@ -9,9 +9,10 @@ This repository stores portable Codex global configuration that is safe to sync 
 - `skills/`: globally installed non-system skills.
 - `rules/`: global reusable rules.
 - `hooks/`: user-level Codex lifecycle hooks.
+- `ccb/ccb.config`: portable CCB agent and window configuration.
 - `install.sh`: installs this repository into `$CODEX_HOME`, defaulting to `~/.codex`.
 
-Do not store Codex runtime state here, such as `auth.json`, history, sqlite databases, logs, sessions, or shell snapshots.
+Do not store Codex or CCB runtime state here, such as credentials, history, sqlite databases, logs, sessions, agent state, backups, or shell snapshots.
 
 ## Install On A Machine
 
@@ -47,6 +48,7 @@ rsync -a --delete \
 
 cp ~/.codex/AGENTS.md ~/projects/codex-global/AGENTS.md
 cp ~/.codex/hooks.json ~/projects/codex-global/hooks.json
+cp ~/.ccb/ccb.config ~/projects/codex-global/ccb/ccb.config
 ```
 
 Then review the diff and commit.
