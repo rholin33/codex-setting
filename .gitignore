@@ -16,6 +16,10 @@ shell_snapshots/
 tmp/
 .tmp/
 
+# CCB agent directories are generated runtime state, not portable config.
+ccb/agents/
+ccb/*.bak.*
+
 # Local editor and OS metadata.
 .idea/
 .vscode/

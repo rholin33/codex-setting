@@ -13,6 +13,7 @@ This repository stores portable Codex global configuration that is safe to sync 
 - `install.sh`: installs this repository into `$CODEX_HOME`, defaulting to `~/.codex`.
 
 Do not store Codex or CCB runtime state here, such as credentials, history, sqlite databases, logs, sessions, agent state, backups, or shell snapshots.
+CCB regenerates `.ccb/agents/` from `ccb.config`; do not copy or commit that directory because it contains project paths, runtime bindings, task history, and provider state.
 
 ## Install On A Machine
 
